@@ -1,20 +1,18 @@
 package sf.codingcompetition2020;
 
 import java.io.FileReader;
+import java.io.IOException;
 import java.io.Reader;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.lang.reflect.InvocationTargetException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.rmi.server.ExportException;
+import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.MappingIterator;
-import com.fasterxml.jackson.databind.ObjectReader;
-import com.fasterxml.jackson.dataformat.csv.CsvMapper;
-import com.fasterxml.jackson.dataformat.csv.CsvSchema;
+import java.util.stream.Stream;
 
 import sf.codingcompetition2020.structures.Agent;
 import sf.codingcompetition2020.structures.Claim;
@@ -30,7 +28,26 @@ public class CodingCompCsvUtil {
 	 * @return -- List of entries being returned.
 	 */
 	public <T> List<T> readCsvFile(String filePath, Class<T> classType) {
+		List<T> list = new ArrayList<>();
+		try {
+			csvStreamer(filePath).skip(1).forEach(stringList -> {
+//				if(classType == Agent.class)
+//					list.add((T) new Agent(stringList));
+//				if(classType == Claim.class)
+//					list.add((T) new Claim(stringList));
+//				if(classType == Customer.class)
+//					list.add((T) new Customer(stringList));
+				try {
+					list.add(classType.getConstructor(List.class).newInstance(stringList));
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+			});
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 
+		return list;
 	}
 
 	
@@ -41,7 +58,8 @@ public class CodingCompCsvUtil {
 	 * @return -- The number of agents in a given area
 	 */
 	public int getAgentCountInArea(String filePath,String area) {
-
+		return (int) readCsvFile(filePath, Agent.class).stream()
+				.filter(ag -> ag.getArea().equals(area)).count();
 	}
 
 	
@@ -53,7 +71,9 @@ public class CodingCompCsvUtil {
 	 * @return -- The number of agents in a given area
 	 */
 	public List<Agent> getAgentsInAreaThatSpeakLanguage(String filePath, String area, String language) {
-
+		return readCsvFile(filePath, Agent.class).stream()
+				.filter(a -> a.getLanguage().equals(language) && a.getArea().equals(area))
+				.collect(Collectors.toList());
 	}
 	
 	
@@ -66,7 +86,13 @@ public class CodingCompCsvUtil {
 	 * @return -- The number of customers that use a certain agent in a given area.
 	 */
 	public short countCustomersFromAreaThatUseAgent(Map<String,String> csvFilePaths, String customerArea, String agentFirstName, String agentLastName) {
-		
+
+		Object[] f = readCsvFile(csvFilePaths.get("agentList"), Agent.class).stream()
+				.filter(agent -> agent.getFirstName().equals(agentFirstName) && agent.getLastName().equals(agentLastName)).toArray();
+
+		return (short) (readCsvFile(csvFilePaths.get("customerList"), Customer.class).stream()
+				.filter(customer -> customer.getArea().equals(customerArea)
+						&& customer.getAgentId() == ((Agent) f [0]).getAgentId()).count());
 	}
 
 	
@@ -77,7 +103,17 @@ public class CodingCompCsvUtil {
 	 * @return -- List of customers retained for a given number of years, in ascending order of policy cost.
 	 */
 	public List<Customer> getCustomersRetainedForYearsByPlcyCostAsc(String customerFilePath, short yearsOfService) {
+		List<Customer> custList = readCsvFile(customerFilePath, Customer.class);
+		List<Customer> filterCustomer = new ArrayList<>();
 
+		custList.forEach(current -> {
+			if (current.getYearsOfService() == yearsOfService) {
+				filterCustomer.add(current);
+			}
+		});
+
+		Collections.sort(filterCustomer, Comparator.comparingInt(Customer::getTotalMonthlyPremiumString));
+		return filterCustomer;
 	}
 
 	
@@ -88,7 +124,14 @@ public class CodingCompCsvUtil {
 	 * @return -- List of customers who’ve made an inquiry for a policy but have not signed up.
 	 */
 	public List<Customer> getLeadsForInsurance(String filePath) {
+		List<Customer> custList = readCsvFile(filePath, Customer.class);
+		List<Customer> filterCustomer = new ArrayList<>();
+		for (Customer current : custList) {
+			if (!current.isAutoPolicy() && !current.isHomePolicy() && !current.isRentersPolicy())
+				filterCustomer.add(current);
 
+		}
+		return filterCustomer;
 	}
 
 
@@ -103,7 +146,13 @@ public class CodingCompCsvUtil {
 	 * @return -- List of vendors within a given area, filtered by scope and vendor rating.
 	 */
 	public List<Vendor> getVendorsWithGivenRatingThatAreInScope(String filePath, String area, boolean inScope, int vendorRating) {
+		 List<Vendor> vendors = new ArrayList<>();
+		 readCsvFile(filePath, Vendor.class).stream().forEach(vendor -> {
+			if( (!inScope || vendor.isInScope()) && vendor.getArea().equals(area) && vendor.getVendorRating() >= vendorRating)
+				vendors.add(vendor);
+		});
 
+		 return vendors;
 	}
 
 
@@ -117,8 +166,15 @@ public class CodingCompCsvUtil {
 	 * @return -- List of customers filtered by age, number of vehicles insured and the number of dependents.
 	 */
 	public List<Customer> getUndisclosedDrivers(String filePath, int vehiclesInsured, int dependents) {
+		List<Customer> cust = readCsvFile(filePath, Customer.class);
 
-	}	
+		List<Customer> customCust = new ArrayList<>();
+		for (Customer current : cust)
+			if (current.getAge() >= 40 && current.getAge() <= 50)
+				if (current.getVehiclesInsured() > vehiclesInsured && current.getDependents().size() <= dependents)
+					customCust.add(current);
+		return customCust;
+	}
 
 
 	/* #9
@@ -130,8 +186,42 @@ public class CodingCompCsvUtil {
 	 * @return -- Agent ID of agent with the given rank.
 	 */
 	public int getAgentIdGivenRank(String filePath, int agentRank) {
-			
-	}	
+
+
+		List<Customer> custList = readCsvFile(filePath, Customer.class);
+
+		Map<Integer, Double> sumOfAgentRatings = new HashMap<>();
+		Map<Integer, Integer> countOfAgentRatings = new HashMap<>();
+
+		custList.forEach(customer -> {
+			int id = customer.getAgentId();
+			double currentSumOfAgentRatings = 0;
+			int currentCountOfAgentRatings = 0;
+
+			if(sumOfAgentRatings.get(id) != null)
+				currentSumOfAgentRatings = sumOfAgentRatings.get(id);
+			if(countOfAgentRatings.get(id) != null)
+				currentCountOfAgentRatings = countOfAgentRatings.get(id);
+
+			double newSumOfAgentRatings = currentSumOfAgentRatings + (double) customer.getAgentRating();
+			int newCountOfAgentRatings = currentCountOfAgentRatings + 1;
+
+			sumOfAgentRatings.put(id, newSumOfAgentRatings);
+			countOfAgentRatings.put(id, newCountOfAgentRatings);
+		});
+
+		Map<Integer, Double> ratingCumulativeAverage = new HashMap<>();
+		for (Integer agentId: sumOfAgentRatings.keySet()) {
+			ratingCumulativeAverage.put(agentId, sumOfAgentRatings.get(agentId) / countOfAgentRatings.get(agentId));
+		}
+
+		List<Integer> sortedAgents = ratingCumulativeAverage.entrySet().stream()
+				.sorted(Comparator.comparing(Map.Entry::getValue, Comparator.reverseOrder()))
+				.map(Map.Entry::getKey)
+				.collect(Collectors.toList());
+
+		return sortedAgents.get(agentRank-1);
+	}
 
 	
 	/* #10
@@ -141,7 +231,33 @@ public class CodingCompCsvUtil {
 	 * @return -- List of customers who’ve filed a claim within the last <numberOfMonths>.
 	 */
 	public List<Customer> getCustomersWithClaims(Map<String,String> csvFilePaths, short monthsOpen) {
+		String customerListFilePath = csvFilePaths.get("customerList");
+		String claimsListFilePath = csvFilePaths.get("claimList");
+		List<Customer> customerList = readCsvFile(customerListFilePath, Customer.class);
+		List<Claim> claimsList = readCsvFile(claimsListFilePath, Claim.class);
 
-	}	
+		Set<Customer> customersWithClaims = new HashSet<>();
+
+		claimsList.forEach(currClaim -> {
+			if (currClaim.getMonthsOpen() <= monthsOpen) {
+				int currentClaimCustomerId = currClaim.getCustomerId();
+				for(Customer cust : customerList)
+					if(cust.getCustomerId() == currentClaimCustomerId)
+						customersWithClaims.add(customerList.get(currentClaimCustomerId-1));
+
+			}
+		});
+		ArrayList list = new ArrayList<>();
+		list.addAll(customersWithClaims);
+		list.remove(0);
+		return list;
+	}
+
+	private Stream<List<String>> csvStreamer(String fileName) throws IOException {
+		return Files.lines(Paths.get(fileName)).map(line -> {
+			String[] lineContents = line.split(",(?=([^\\\"]*\\\"[^\\\"]*\\\")*[^\\\"]*$)");
+			return Arrays.asList(lineContents);
+		});
+	}
 
 }
